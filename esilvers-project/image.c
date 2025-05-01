@@ -39,7 +39,13 @@ struct image_dev {
 static int image_num_blocks(struct blkdev *dev)
 {
 	//CS492: your code here
-	return -1;
+	if(!dev || !dev->private) { // Validate the inputs
+		fprintf(stderr, "image_num_blocks gotta bad input");
+		return -1; 
+	}
+	
+	struct image_dev *im = dev->private;
+	return im->nblks;
 }
 
 
@@ -93,7 +99,63 @@ static int image_read(struct blkdev *dev, int first_blk, int nblks, void *buf)
 static int image_write(struct blkdev * dev, int first_blk, int nblks, void *buf)
 {
 	//CS492: your code here
-	return -1;
+	// Validate the inputs
+	if(!dev || !dev->private || !buf) { 
+		fprintf(stderr, "image_write gotta bad input");
+		return E_BADADDR;
+	}
+
+	struct image_dev *im = dev->private; 
+
+	// Check if unavailable
+	if(im->fd == -1) {
+		return E_UNAVAIL;
+	}
+
+	// Check if I gotta write anything
+	if (nblks == 0) {
+		return SUCCESS;
+	}
+
+	// Check the bounds
+	if(first_blk < 0 || first_blk + nblks > im->nblks || nblks < 0) {
+		fprintf(stderr, "Bad block range in image_write");
+		return E_UNAVAIL; 
+	}
+
+	// Check if anything to write
+	if(nblks <= 0) {
+		return 0;
+	}
+
+	// getting the file descriptor from the data
+	int fd = im->fd;
+	off_t offset = (off_t)first_blk * BLOCK_SIZE;
+	size_t tot_bytes_to_write = (size_t)nblks * BLOCK_SIZE;
+	ssize_t tot_bytes_written = 0; 
+
+	// seek to the correct position
+	if(lseek(fd, offset, SEEK_SET) == (off_t)-1) {
+		fprintf(stderr, "lseek had a prob in image_write");
+		return E_UNAVAIL;
+	}
+
+	// we gotta now figure out how to handle the partial writes
+	while (tot_bytes_written < tot_bytes_to_write) {
+		ssize_t bytes_written_in_call = write(fd, (char *)buf + tot_bytes_written, tot_bytes_to_write - tot_bytes_written);
+
+		if(bytes_written_in_call <= 0) {
+			// do i need to do something if the sys call is interrupted?
+
+			fprintf(stderr, "write call failed in image_write");
+			// Return num of blocks written before err
+			return -1;
+		}
+
+		tot_bytes_written += bytes_written_in_call;
+	}
+
+	return SUCCESS;
 }
 
 /**
@@ -109,7 +171,26 @@ static int image_write(struct blkdev * dev, int first_blk, int nblks, void *buf)
 static int image_flush(struct blkdev * dev, int first_blk, int nblks)
 {
 	//CS492: your code here
-	return -1;
+	// validate inputs
+	if (!dev || !dev->private) {
+		fprintf(stderr, "invalid input for image_flush"); 
+		return E_UNAVAIL;
+	}
+
+	struct image_dev *im = dev->private; 
+
+	// Check if the disk is unavilable
+	if (im->fd == -1) {
+		return E_UNAVAIL;
+	}
+
+	// using fsync to flush file data
+	if(fsync(im->fd) == -1) {
+		fprintf(stderr, "fsyc failed in the image_flush");
+		return E_UNAVAIL;
+	}
+
+	return SUCCESS;
 }
 
 /**
@@ -122,6 +203,23 @@ static int image_flush(struct blkdev * dev, int first_blk, int nblks)
 static void image_close(struct blkdev *dev)
 {
 	//CS492: your code here
+	if(dev) {
+		if(dev->private) {
+			struct image_dev *im = dev->private; 
+			if(im->fd != -1) {
+				if(close(im->fd) == -1) {
+					fprintf(stderr, "Something wrong with close in image_close");
+				}
+				// set as closed
+				im->fd = -1; 
+			}
+
+			free(im->path); 
+			im->path = NULL;
+			free(im);
+		}
+		free(dev);
+	}
 }
 
 /** Operations on this block device */
