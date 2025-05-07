@@ -434,7 +434,9 @@ static int is_empty_dir(struct fs_dirent *de)
 {
 	for (int i = 0; i < DIRENTS_PER_BLK; i++)
 	{
-		if (de[i].valid)
+		if (de[i].valid &&
+		    strcmp(de[i].name, ".") != 0 && 
+            strcmp(de[i].name, "..") != 0)
 		{
 			return 0;
 		}
@@ -1163,9 +1165,6 @@ static int fs_rename(const char *src_path, const char *dst_path)
 	// if src inode does not exist return error
 	if (src_inode_idx < 0)
 		return src_inode_idx;
-	// if dst already exist return error
-	if (dst_inode_idx >= 0)
-		return -EEXIST;
 
 	// get parent directory inode
 	char src_name[FS_FILENAME_SIZE];
@@ -1188,6 +1187,19 @@ static int fs_rename(const char *src_path, const char *dst_path)
 	memset(entries, 0, DIRENTS_PER_BLK * sizeof(struct fs_dirent));
 	if (disk->ops->read(disk, parent_inode->direct[0], 1, entries) < 0)
 		exit(1);
+
+	// if dst already exist, remove the destination file first
+	if (dst_inode_idx >= 0){
+		for (int i = 0; i < DIRENTS_PER_BLK; i++) {
+			if (entries[i].valid && entries[i].inode == dst_inode_idx) {
+				entries[i].valid = 0;
+				break;
+			}
+    	}
+		return_inode(dst_inode_idx);
+		memset(&inodes[dst_inode_idx], 0, sizeof(struct fs_inode));
+		update_inode(dst_inode_idx);
+	}
 
 	// make change to buff
 	for (int i = 0; i < DIRENTS_PER_BLK; i++)
